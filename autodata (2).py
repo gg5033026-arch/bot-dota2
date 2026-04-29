@@ -5,6 +5,7 @@ import re
 import json
 import time
 import logging
+import html
 from telebot.types import Message
 from FunPayAPI.updater.events import NewMessageEvent
 
@@ -213,14 +214,14 @@ def fsm_handler(message: Message, cardinal: "Cardinal"):
         data.setdefault(uid, []).append(entry)
         save_data(data)
 
-        kw_txt = f"<code>{lot_keyword}</code>" if lot_keyword else "не задано (без проверки)"
+        kw_txt = f"<code>{html.escape(lot_keyword)}</code>" if lot_keyword else "не задано (без проверки)"
         cardinal.telegram.bot.send_message(
             chat_id,
             (
                 "✅ Запись добавлена.\n"
-                f"💬 Команда: <code>{entry['command']}</code>\n"
+                f"💬 Команда: <code>{html.escape(entry['command'])}</code>\n"
                 f"🔑 Ключевое слово лота: {kw_txt}\n"
-                f"📝 Ответ:\n<pre>{entry['response'][:300]}</pre>"
+                f"📝 Ответ:\n<pre>{html.escape(entry['response'][:300])}</pre>"
             ),
             parse_mode="HTML"
         )
@@ -238,7 +239,7 @@ def listdata_handler(message: Message, cardinal: "Cardinal"):
         kw  = entry.get("lot_keyword") or "—"
         preview = entry["response"].replace("\n", " ")[:60]
         lines.append(
-            f"{i}. 💬 <code>{entry['command']}</code> | 🔑 {kw}\n"
+            f"{i}. 💬 <code>{html.escape(str(entry['command']))}</code> | 🔑 {html.escape(str(kw))}\n"
             f"   📝 {preview}…"
         )
     cardinal.telegram.bot.send_message(
@@ -306,7 +307,7 @@ def new_message_handler(cardinal: "Cardinal", event: NewMessageEvent):
                         owner_tg_id = int(uid)
                         notify_text = (
                             f"📤 Выдача данных:\n"
-                            f"💬 Команда: <code>{entry['command']}</code>\n"
+                            f"💬 Команда: <code>{html.escape(entry['command'])}</code>\n"
                             f"👤 Покупатель: {username or buyer_id}"
                         )
                         cardinal.telegram.bot.send_message(
@@ -441,7 +442,7 @@ def editdata_start(message: Message, cardinal: "Cardinal"):
     for i, entry in enumerate(data[uid], 1):
         kw      = entry.get("lot_keyword") or "—"
         preview = entry["response"].replace("\n", " ")[:60]
-        lines.append(f"{i}. 💬 <code>{entry['command']}</code> | 🔑 {kw}\n   📝 {preview}…")
+        lines.append(f"{i}. 💬 <code>{html.escape(str(entry['command']))}</code> | 🔑 {html.escape(str(kw))}\n   📝 {html.escape(preview)}…")
 
     _edit_states[message.chat.id] = {"step": "pick"}
     cardinal.telegram.bot.send_message(
@@ -483,7 +484,7 @@ def editdata_fsm(message: Message, cardinal: "Cardinal"):
 
         cardinal.telegram.bot.send_message(
             chat_id,
-            f"✏️ Запись: <code>{entry['command']}</code>\n\n"
+            f"✏️ Запись: <code>{html.escape(entry['command'])}</code>\n\n"
             "Что хотите изменить?\n"
             "1. Текст выдачи\n"
             "2. Команду\n"
@@ -499,7 +500,7 @@ def editdata_fsm(message: Message, cardinal: "Cardinal"):
             entry = data[uid][st["idx"]]
             cardinal.telegram.bot.send_message(
                 chat_id,
-                f"📝 Текущий текст выдачи:\n\n<pre>{entry['response'][:500]}</pre>\n\n"
+                f"📝 Текущий текст выдачи:\n\n<pre>{html.escape(entry['response'][:500])}</pre>\n\n"
                 "Введите новый текст:",
                 parse_mode="HTML"
             )
@@ -509,7 +510,7 @@ def editdata_fsm(message: Message, cardinal: "Cardinal"):
             entry = data[uid][st["idx"]]
             cardinal.telegram.bot.send_message(
                 chat_id,
-                f"💬 Текущая команда: <code>{entry['command']}</code>\n\n"
+                f"💬 Текущая команда: <code>{html.escape(entry['command'])}</code>\n\n"
                 "Введите новую команду:",
                 parse_mode="HTML"
             )
@@ -520,7 +521,7 @@ def editdata_fsm(message: Message, cardinal: "Cardinal"):
             cur   = entry.get("lot_keyword") or "не задано"
             cardinal.telegram.bot.send_message(
                 chat_id,
-                f"🔑 Текущее ключевое слово: <code>{cur}</code>\n\n"
+                f"🔑 Текущее ключевое слово: <code>{html.escape(cur)}</code>\n\n"
                 "Введите новое ключевое слово (или <code>-</code> чтобы убрать):",
                 parse_mode="HTML"
             )
@@ -544,7 +545,7 @@ def editdata_fsm(message: Message, cardinal: "Cardinal"):
         cardinal.telegram.bot.send_message(
             chat_id,
             f"✅ <b>{field_names.get(field, field)}</b> обновлён!\n"
-            f"💬 Команда: <code>{data[uid][idx]['command']}</code>",
+            f"💬 Команда: <code>{html.escape(data[uid][idx]['command'])}</code>",
             parse_mode="HTML"
         )
 
