@@ -63,6 +63,11 @@ def save_notify(data: dict):
         json.dump(data, f, indent=4, ensure_ascii=False)
 
 
+
+
+def normalize_command(value: str) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip())
+
 def should_notify(command: str) -> bool:
     """Проверяет, нужно ли слать уведомление для данной команды."""
     cfg = load_notify()
@@ -122,6 +127,8 @@ user_states: dict[int, dict] = {}
 
 
 def adddata_start(message: Message, cardinal: "Cardinal"):
+    user_states.pop(message.chat.id, None)
+    _edit_states.pop(message.chat.id, None)
     user_states[message.chat.id] = {"step": "command"}
     cardinal.telegram.bot.send_message(
         message.chat.id,
@@ -130,6 +137,8 @@ def adddata_start(message: Message, cardinal: "Cardinal"):
 
 
 def deldata_start(message: Message, cardinal: "Cardinal"):
+    user_states.pop(message.chat.id, None)
+    _edit_states.pop(message.chat.id, None)
     uid = str(message.chat.id)
     data = load_data()
     if uid not in data or not data[uid]:
@@ -158,7 +167,7 @@ def fsm_handler(message: Message, cardinal: "Cardinal"):
 
     # ── Удаление ──────────────────────────────────────────────────────────────
     if state["step"] == "del_target":
-        target = message.text.strip().lower()
+        target = normalize_command(message.text).lower()
         before = len(data.get(uid, []))
         data[uid] = [e for e in data.get(uid, []) if e["command"].lower() != target]
         if len(data.get(uid, [])) < before:
@@ -171,8 +180,11 @@ def fsm_handler(message: Message, cardinal: "Cardinal"):
 
     # ── Добавление ────────────────────────────────────────────────────────────
     if state["step"] == "command":
-        cmd = message.text.strip()
-        if any(e["command"].lower() == cmd.lower() for e in data.get(uid, [])):
+        cmd = normalize_command(message.text)
+        if not cmd:
+            cardinal.telegram.bot.send_message(chat_id, "❌ Команда не может быть пустой.")
+            return
+        if any(normalize_command(e["command"]).lower() == cmd.lower() for e in data.get(uid, [])):
             cardinal.telegram.bot.send_message(chat_id, "❌ Такая команда уже есть.")
             user_states.pop(chat_id, None)
             return
@@ -431,6 +443,8 @@ _edit_states: dict[int, dict] = {}
 
 
 def editdata_start(message: Message, cardinal: "Cardinal"):
+    user_states.pop(message.chat.id, None)
+    _edit_states.pop(message.chat.id, None)
     uid  = str(message.chat.id)
     data = load_data()
 
@@ -535,7 +549,7 @@ def editdata_fsm(message: Message, cardinal: "Cardinal"):
         if field == "lot_keyword":
             new_val = "" if txt == "-" else txt
         else:
-            new_val = message.text  # сохраняем как есть (с переносами)
+            new_val = normalize_command(message.text) if field == "command" else message.text  # сохраняем как есть (с переносами)
 
         data[uid][idx][field] = new_val
         save_data(data)
