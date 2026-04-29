@@ -5,6 +5,7 @@ import re
 import json
 import time
 import logging
+import html
 from telebot.types import Message
 from FunPayAPI.updater.events import NewMessageEvent
 
@@ -61,6 +62,11 @@ def save_notify(data: dict):
     with open(NOTIFY_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
+
+
+
+def normalize_command(value: str) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip())
 
 def should_notify(command: str) -> bool:
     """Проверяет, нужно ли слать уведомление для данной команды."""
@@ -121,14 +127,18 @@ user_states: dict[int, dict] = {}
 
 
 def adddata_start(message: Message, cardinal: "Cardinal"):
+    user_states.pop(message.chat.id, None)
+    _edit_states.pop(message.chat.id, None)
     user_states[message.chat.id] = {"step": "command"}
     cardinal.telegram.bot.send_message(
         message.chat.id,
-        "⌨️ Введите команду (фразу), по которой покупатель получит данные:"
+        "⌨️ Введите команду (фразу), по которой покупатель получит данные.\nМожно использовать /команды.\nДля отмены: /cancel"
     )
 
 
 def deldata_start(message: Message, cardinal: "Cardinal"):
+    user_states.pop(message.chat.id, None)
+    _edit_states.pop(message.chat.id, None)
     uid = str(message.chat.id)
     data = load_data()
     if uid not in data or not data[uid]:
@@ -137,7 +147,7 @@ def deldata_start(message: Message, cardinal: "Cardinal"):
     user_states[message.chat.id] = {"step": "del_target"}
     cardinal.telegram.bot.send_message(
         message.chat.id,
-        "🗑 Введите команду для удаления:"
+        "🗑 Введите команду для удаления.\nДля отмены: /cancel"
     )
 
 
@@ -145,9 +155,10 @@ def fsm_handler(message: Message, cardinal: "Cardinal"):
     chat_id = message.chat.id
     if chat_id not in user_states:
         return
-    # Любая команда (/) отменяет FSM
-    if (message.text or "").strip().startswith("/"):
+    # Отмена FSM только по /cancel, чтобы можно было сохранять команды вида /start
+    if (message.text or "").strip().lower() == "/cancel":
         user_states.pop(chat_id, None)
+        cardinal.telegram.bot.send_message(chat_id, "❎ Действие отменено.")
         return
 
     state = user_states[chat_id]
@@ -156,7 +167,7 @@ def fsm_handler(message: Message, cardinal: "Cardinal"):
 
     # ── Удаление ──────────────────────────────────────────────────────────────
     if state["step"] == "del_target":
-        target = message.text.strip().lower()
+        target = normalize_command(message.text).lower()
         before = len(data.get(uid, []))
         data[uid] = [e for e in data.get(uid, []) if e["command"].lower() != target]
         if len(data.get(uid, [])) < before:
@@ -169,8 +180,11 @@ def fsm_handler(message: Message, cardinal: "Cardinal"):
 
     # ── Добавление ────────────────────────────────────────────────────────────
     if state["step"] == "command":
-        cmd = message.text.strip()
-        if any(e["command"].lower() == cmd.lower() for e in data.get(uid, [])):
+        cmd = normalize_command(message.text)
+        if not cmd:
+            cardinal.telegram.bot.send_message(chat_id, "❌ Команда не может быть пустой.")
+            return
+        if any(normalize_command(e["command"]).lower() == cmd.lower() for e in data.get(uid, [])):
             cardinal.telegram.bot.send_message(chat_id, "❌ Такая команда уже есть.")
             user_states.pop(chat_id, None)
             return
@@ -212,14 +226,14 @@ def fsm_handler(message: Message, cardinal: "Cardinal"):
         data.setdefault(uid, []).append(entry)
         save_data(data)
 
-        kw_txt = f"<code>{lot_keyword}</code>" if lot_keyword else "не задано (без проверки)"
+        kw_txt = f"<code>{html.escape(str(lot_keyword))}</code>" if lot_keyword else "не задано (без проверки)"
         cardinal.telegram.bot.send_message(
             chat_id,
             (
                 "✅ Запись добавлена.\n"
-                f"💬 Команда: <code>{entry['command']}</code>\n"
+                f"💬 Команда: <code>{html.escape(str(entry['command']))}</code>\n"
                 f"🔑 Ключевое слово лота: {kw_txt}\n"
-                f"📝 Ответ:\n<pre>{entry['response'][:300]}</pre>"
+                f"📝 Ответ:\n<pre>{html.escape(str(entry['response'][:300]))}</pre>"
             ),
             parse_mode="HTML"
         )
@@ -237,7 +251,7 @@ def listdata_handler(message: Message, cardinal: "Cardinal"):
         kw  = entry.get("lot_keyword") or "—"
         preview = entry["response"].replace("\n", " ")[:60]
         lines.append(
-            f"{i}. 💬 <code>{entry['command']}</code> | 🔑 {kw}\n"
+            f"{i}. 💬 <code>{html.escape(str(entry['command']))}</code> | 🔑 {html.escape(str(kw))}\n"
             f"   📝 {preview}…"
         )
     cardinal.telegram.bot.send_message(
@@ -305,7 +319,7 @@ def new_message_handler(cardinal: "Cardinal", event: NewMessageEvent):
                         owner_tg_id = int(uid)
                         notify_text = (
                             f"📤 Выдача данных:\n"
-                            f"💬 Команда: <code>{entry['command']}</code>\n"
+                            f"💬 Команда: <code>{html.escape(str(entry['command']))}</code>\n"
                             f"👤 Покупатель: {username or buyer_id}"
                         )
                         cardinal.telegram.bot.send_message(
@@ -429,6 +443,8 @@ _edit_states: dict[int, dict] = {}
 
 
 def editdata_start(message: Message, cardinal: "Cardinal"):
+    user_states.pop(message.chat.id, None)
+    _edit_states.pop(message.chat.id, None)
     uid  = str(message.chat.id)
     data = load_data()
 
@@ -440,12 +456,12 @@ def editdata_start(message: Message, cardinal: "Cardinal"):
     for i, entry in enumerate(data[uid], 1):
         kw      = entry.get("lot_keyword") or "—"
         preview = entry["response"].replace("\n", " ")[:60]
-        lines.append(f"{i}. 💬 <code>{entry['command']}</code> | 🔑 {kw}\n   📝 {preview}…")
+        lines.append(f"{i}. 💬 <code>{html.escape(str(entry['command']))}</code> | 🔑 {html.escape(str(kw))}\n   📝 {html.escape(str(preview))}…")
 
     _edit_states[message.chat.id] = {"step": "pick"}
     cardinal.telegram.bot.send_message(
         message.chat.id,
-        "✏️ Выберите запись для редактирования (введите номер):\n\n" + "\n\n".join(lines),
+        "✏️ Выберите запись для редактирования (введите номер).\nДля отмены: /cancel\n\n" + "\n\n".join(lines),
         parse_mode="HTML"
     )
 
@@ -454,8 +470,9 @@ def editdata_fsm(message: Message, cardinal: "Cardinal"):
     chat_id = message.chat.id
     if chat_id not in _edit_states:
         return
-    if (message.text or "").strip().startswith("/"):
+    if (message.text or "").strip().lower() == "/cancel":
         _edit_states.pop(chat_id, None)
+        cardinal.telegram.bot.send_message(chat_id, "❎ Редактирование отменено.")
         return
 
     st   = _edit_states[chat_id]
@@ -481,7 +498,7 @@ def editdata_fsm(message: Message, cardinal: "Cardinal"):
 
         cardinal.telegram.bot.send_message(
             chat_id,
-            f"✏️ Запись: <code>{entry['command']}</code>\n\n"
+            f"✏️ Запись: <code>{html.escape(str(entry['command']))}</code>\n\n"
             "Что хотите изменить?\n"
             "1. Текст выдачи\n"
             "2. Команду\n"
@@ -497,7 +514,7 @@ def editdata_fsm(message: Message, cardinal: "Cardinal"):
             entry = data[uid][st["idx"]]
             cardinal.telegram.bot.send_message(
                 chat_id,
-                f"📝 Текущий текст выдачи:\n\n<pre>{entry['response'][:500]}</pre>\n\n"
+                f"📝 Текущий текст выдачи:\n\n<pre>{html.escape(str(entry['response'][:500]))}</pre>\n\n"
                 "Введите новый текст:",
                 parse_mode="HTML"
             )
@@ -507,7 +524,7 @@ def editdata_fsm(message: Message, cardinal: "Cardinal"):
             entry = data[uid][st["idx"]]
             cardinal.telegram.bot.send_message(
                 chat_id,
-                f"💬 Текущая команда: <code>{entry['command']}</code>\n\n"
+                f"💬 Текущая команда: <code>{html.escape(str(entry['command']))}</code>\n\n"
                 "Введите новую команду:",
                 parse_mode="HTML"
             )
@@ -518,7 +535,7 @@ def editdata_fsm(message: Message, cardinal: "Cardinal"):
             cur   = entry.get("lot_keyword") or "не задано"
             cardinal.telegram.bot.send_message(
                 chat_id,
-                f"🔑 Текущее ключевое слово: <code>{cur}</code>\n\n"
+                f"🔑 Текущее ключевое слово: <code>{html.escape(str(cur))}</code>\n\n"
                 "Введите новое ключевое слово (или <code>-</code> чтобы убрать):",
                 parse_mode="HTML"
             )
@@ -532,7 +549,7 @@ def editdata_fsm(message: Message, cardinal: "Cardinal"):
         if field == "lot_keyword":
             new_val = "" if txt == "-" else txt
         else:
-            new_val = message.text  # сохраняем как есть (с переносами)
+            new_val = normalize_command(message.text) if field == "command" else message.text  # сохраняем как есть (с переносами)
 
         data[uid][idx][field] = new_val
         save_data(data)
@@ -542,7 +559,7 @@ def editdata_fsm(message: Message, cardinal: "Cardinal"):
         cardinal.telegram.bot.send_message(
             chat_id,
             f"✅ <b>{field_names.get(field, field)}</b> обновлён!\n"
-            f"💬 Команда: <code>{data[uid][idx]['command']}</code>",
+            f"💬 Команда: <code>{html.escape(str(data[uid][idx]['command']))}</code>",
             parse_mode="HTML"
         )
 
@@ -556,11 +573,11 @@ def init_cardinal(cardinal: "Cardinal"):
     tg.msg_handler(lambda m: datanotify_handler(m, cardinal), commands=["datanotify"])
     tg.msg_handler(
         lambda m: fsm_handler(m, cardinal),
-        func=lambda m: m.chat.id in user_states and not (m.text or "").strip().startswith("/")
+        func=lambda m: m.chat.id in user_states
     )
     tg.msg_handler(
         lambda m: editdata_fsm(m, cardinal),
-        func=lambda m: m.chat.id in _edit_states and not (m.text or "").strip().startswith("/")
+        func=lambda m: m.chat.id in _edit_states
     )
 
     cardinal.add_telegram_commands(UUID, [
