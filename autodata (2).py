@@ -124,7 +124,7 @@ def adddata_start(message: Message, cardinal: "Cardinal"):
     user_states[message.chat.id] = {"step": "command"}
     cardinal.telegram.bot.send_message(
         message.chat.id,
-        "⌨️ Введите команду (фразу), по которой покупатель получит данные:"
+        "⌨️ Введите команду (фразу), по которой покупатель получит данные.\nМожно использовать /команды.\nДля отмены: /cancel"
     )
 
 
@@ -137,7 +137,7 @@ def deldata_start(message: Message, cardinal: "Cardinal"):
     user_states[message.chat.id] = {"step": "del_target"}
     cardinal.telegram.bot.send_message(
         message.chat.id,
-        "🗑 Введите команду для удаления:"
+        "🗑 Введите команду для удаления.\nДля отмены: /cancel"
     )
 
 
@@ -145,9 +145,10 @@ def fsm_handler(message: Message, cardinal: "Cardinal"):
     chat_id = message.chat.id
     if chat_id not in user_states:
         return
-    # Любая команда (/) отменяет FSM
-    if (message.text or "").strip().startswith("/"):
+    # Отмена FSM только по /cancel, чтобы можно было сохранять команды вида /start
+    if (message.text or "").strip().lower() == "/cancel":
         user_states.pop(chat_id, None)
+        cardinal.telegram.bot.send_message(chat_id, "❎ Действие отменено.")
         return
 
     state = user_states[chat_id]
@@ -445,7 +446,7 @@ def editdata_start(message: Message, cardinal: "Cardinal"):
     _edit_states[message.chat.id] = {"step": "pick"}
     cardinal.telegram.bot.send_message(
         message.chat.id,
-        "✏️ Выберите запись для редактирования (введите номер):\n\n" + "\n\n".join(lines),
+        "✏️ Выберите запись для редактирования (введите номер).\nДля отмены: /cancel\n\n" + "\n\n".join(lines),
         parse_mode="HTML"
     )
 
@@ -454,8 +455,9 @@ def editdata_fsm(message: Message, cardinal: "Cardinal"):
     chat_id = message.chat.id
     if chat_id not in _edit_states:
         return
-    if (message.text or "").strip().startswith("/"):
+    if (message.text or "").strip().lower() == "/cancel":
         _edit_states.pop(chat_id, None)
+        cardinal.telegram.bot.send_message(chat_id, "❎ Редактирование отменено.")
         return
 
     st   = _edit_states[chat_id]
@@ -556,11 +558,11 @@ def init_cardinal(cardinal: "Cardinal"):
     tg.msg_handler(lambda m: datanotify_handler(m, cardinal), commands=["datanotify"])
     tg.msg_handler(
         lambda m: fsm_handler(m, cardinal),
-        func=lambda m: m.chat.id in user_states and not (m.text or "").strip().startswith("/")
+        func=lambda m: m.chat.id in user_states
     )
     tg.msg_handler(
         lambda m: editdata_fsm(m, cardinal),
-        func=lambda m: m.chat.id in _edit_states and not (m.text or "").strip().startswith("/")
+        func=lambda m: m.chat.id in _edit_states
     )
 
     cardinal.add_telegram_commands(UUID, [
